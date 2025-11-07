@@ -30,3 +30,14 @@ provider "docker" {}
 Declaramos que el proveedor es docker , indicando a su vez que se obtendra (source) desde el proveedor oficial de Docker. Instanciando  al motor Docker ya descargado en la ultima linea
 
 Tambien se agregan variables,  en este caso el **variable "name"** del proyecto en variables.tf  
+
+Se hace uso del principio de composabilidad de IaC (terraform) para  agregar dos "modulo"  en main.tf que hacen referencia a backend y proxy
+```bash
+module "backend" {
+    source = "../../modules/backend"
+}
+
+module "proxy" {
+    source = "../../modules/proxy"
+}
+```

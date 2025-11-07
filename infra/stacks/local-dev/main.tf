@@ -8,3 +8,11 @@ terraform{
     }
 }
 provider "docker" {}
+
+module "backend" {
+    source = "../../modules/backend"
+}
+
+module "proxy" {
+    source = "../../modules/proxy"
+}
