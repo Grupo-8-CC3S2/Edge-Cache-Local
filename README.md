@@ -41,3 +41,26 @@ module "proxy" {
     source = "../../modules/proxy"
 }
 ```
+
+Ahora que se tiene la estructura basica, se agrega el .conf,puesto que Nginx usa una estructura jerarquica de bloques delimitados por {..} , introducimos dos directivas 
+```bash
+events {} 
+http {}
+```
+La primera directiva configura la gestion de conexiones, en este caso se usarán valores por defecto , en tanto que el segundo bloque configura el servidor http.Se agrega el bloque server dentro de http, este representa un servidor virtual dentro de Nginx 
+```bash
+events{}
+http{
+    server{
+    }
+}
+```
+Seguidamente se establece la redireccion de las solicitudes en el bloque location
+```bash
+events{}
+http{
+    server{
+        location / {}
+    }
+}
+```
