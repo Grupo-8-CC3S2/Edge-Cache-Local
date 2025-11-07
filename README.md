@@ -16,3 +16,17 @@ infra
             variables.tf
             outputs.tf
 ```
+A continuacion la configuracion base de terraform
+```bash
+terraform{
+    required_providers {
+        docker = {
+            source = "kreuzwerker/docker"
+        }
+    }
+}
+provider "docker" {}
+```
+Declaramos que el proveedor es docker , indicando a su vez que se obtendra (source) desde el proveedor oficial de Docker. Instanciando  al motor Docker ya descargado en la ultima linea
+
+Tambien se agregan variables,  en este caso el **variable "name"** del proyecto en variables.tf  
