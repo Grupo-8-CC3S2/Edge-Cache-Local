@@ -1,7 +1,0 @@
-*.tfstate
-.terraform/  
-*.tfplan
-crash.log
-
-# bitacora personal
-inconvenientes.md
