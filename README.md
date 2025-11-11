@@ -1,6 +1,34 @@
 # Edge-Cache-Local
+
 CDN casera con Nginx + pruebas de performance
 El proyecto consiste en montar un reverse proxy con caché (Nginx) delante de un servicio backend, con políticas de cacheo, invalidación y observabilidad de hit/miss. Ademas en la orquestación local con Terraform (docker provider/localexec, evitando imports manuales).
+
+## Uso del Backend
+
+Esta sección explica cómo levantar el backend usando diferentes métodos: local sin Docker, con Docker directamente y usando Makefile.
+
+### Sin Docker ni Makefile
+
+```sh
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8001
+```
+
+### Con Docker (sin Makefile)
+
+```sh
+docker compose up --build # es posible definir variables PORT y HOST
+```
+
+### Con Makefile y Docker
+
+```sh
+make build-backend-docker
+make run-backend-docker # es posible definir variable PORT
+```
+
 ## Primer issue : Inicializar estructura IaC en Terraform 
 La estructura de archivos tentativa
 ```bash
