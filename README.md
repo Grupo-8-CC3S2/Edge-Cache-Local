@@ -1,7 +1,64 @@
 # Edge-Cache-Local
 
-CDN casera con Nginx + pruebas de performance
+CDN casera con Nginx + pruebas de performance.
 El proyecto consiste en montar un reverse proxy con caché (Nginx) delante de un servicio backend, con políticas de cacheo, invalidación y observabilidad de hit/miss. Ademas en la orquestación local con Terraform (docker provider/localexec, evitando imports manuales).
+
+## Uso de la Infraestructura
+
+Configuramos nuestras variables de entorno. Ejemplo de `infra/stacks/local-dev/terraform.tfvars`:
+
+```
+# Variables para el stack de desarrollo local
+
+# General
+app_version    = "1.0.0"
+network_name   = "edge-cache-network"
+restart_policy = "unless-stopped"
+
+# Backend
+backend_container_name = "edge-backend"
+backend_image          = "edge-cache-backend:latest"
+backend_build_context  = "../../../" # Path relativo al root del proyecto
+backend_internal_port  = 8080
+backend_external_port  = 8080
+
+backend_environment = {
+  HOST = "0.0.0.0"
+  PORT = 8080
+}
+
+# Proxy
+proxy_container_name = "edge-cache-proxy"
+nginx_image          = "nginx:alpine"
+nginx_config_path    = "/home/jquispe/Escritorio/cursos/Actividades/Edge-Cache-Local/proxy/nginx.conf"  # Ruta al nginx.conf que usaremos
+proxy_external_port  = 80
+```
+
+Creamos la infraestructura:
+
+```sh
+make plan
+make apply
+```
+
+Verificamos:
+
+```sh
+# La respuesta debe ser {"status":"ok"}
+curl http://localhost:8080/api/v1/health 
+curl http://localhost:80/api/v1/health
+curl http://localhost/api/v1/health
+```
+
+Ademas al ejecutar `docker ps` deberiamos tener de salida algo como:
+
+```
+CONTAINER ID   IMAGE          COMMAND                  CREATED              STATUS              PORTS                              NAMES
+1edc286df1c3   d4918ca78576   "/docker-entrypoint.…"   About a minute ago   Up About a minute   0.0.0.0:80->80/tcp                 edge-cache-proxy
+0669781d5cef   1ffb655cd9f9   "/bin/sh -c 'uvicorn…"   About a minute ago   Up About a minute   8000/tcp, 0.0.0.0:8080->8080/tcp   edge-backend
+```
+
+Para destruir la infraestructura desplegada usamos `make destroy`.
 
 ## Uso del Backend
 
