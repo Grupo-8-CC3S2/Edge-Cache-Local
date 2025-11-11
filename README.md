@@ -122,3 +122,56 @@ http://localhost:8080/api/v1/health
 ```
 Para hacer el codigo portable se usan rutas reativas  para el contexto de docker **default     = "../../../src/app"**  y para la ruta al docerfile  
 **default   = "Dockerfile"**
+
+Respecto al proxy, tambien se crean las variables en variables.tf los cuales son :contenedor_proxy quien declara la info del contenedor para nginx, la imagen nginx:alpine que sera buscado por terraform en Dockerhub , el puerto , la ruta de nginx que define la logica a ejecutar dentro del contenedor(el servidor que se expondra a internet) y la info del contenedor donde corre el backend.
+
+En tanto que en main.tf dentro del modulo/proxy declaramos bloques similares establecemos el proveedor, declaramos como construiremos  que tipo de imagen y contenedor queremos asi como los puertos que se expondran . Lo nuevo es el bloque volumes, donde se registra la configuracion del proxy pass dentro del contenedor nginx 
+```bash
+
+volumes {
+    host_path = var.ruta_nginx
+    container_path = "etc/nginx/nginx.conf"
+    read_only = true
+}
+```
+y finalmente un output
+
+Ahora bien , en el .conf se abraca el corazon del proyecto Edge-Cache-Local, declaramos el bloque events {} definimos cuantas conexiones manejaremos de forma simultanea en este caso 1024 por worker.
+
+Seguidamente usamos la palabra reservada http para definir al upstream backend y al server. El primero define un grupo de servidores , en este solo uno edge-backend : 8080 ; en cuanto al blqoue server es un tanto familiar, define el puerto nginx expondra asi como el servidor al que se redirigiran las solicitudes.
+
+Entonces en infra/modules/proxy , se levanta la infraestructura, construyendo la imagen y el contenedor asi como estableciendo el proxy pass.
+
+Ejecutamos terraformm apply 
+```bash
+docker_container.proxy: Creating...
+docker_container.proxy: Creation complete after 1s [id=bee4f106f4a5f7f21ea80d7467e6451891af17b13591f2bfafae69bf1500e7a7]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+```
+
+sin embargo hace falta una red comun
+entonces agregamos las variables 
+```bash
+variable "nombre_red" {
+  description = "Nombre de la red Docker compartida"
+  type        = string
+  default     = "edge-cache-network"
+}
+``` 
+y dentro del recurso 
+```bash
+ networks_advanced {
+    name = data.docker_network.shared.name
+  }
+
+#terraform apply
+Apply complete! Resources: 0 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+proxy_endpoint = "http://localhost:80/api/v1/health"
+{"status":"ok"}
+```

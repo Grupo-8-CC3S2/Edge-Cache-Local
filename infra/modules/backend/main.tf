@@ -18,6 +18,10 @@ resource "docker_image" "imagen_backend" {
   }
 }
 
+data "docker_network" "shared" {
+  name = var.nombre_red
+}
+
 resource "docker_container" "contenedor_backend" {
   name  = var.container_name
   image = docker_image.imagen_backend.image_id
@@ -26,11 +30,18 @@ resource "docker_container" "contenedor_backend" {
     internal = var.app_port
     external = var.app_port
   }
-
+  networks_advanced {
+    name = data.docker_network.shared.name
+  }
   env = var.env_vars
 
   restart        = "no"
   remove_volumes = true
   must_run       = true
   start          = true
+}
+
+output "nombre_contenedor" {
+    description = "nombre del contenedor"
+    value = var.container_name
 }

@@ -33,3 +33,9 @@ variable "env_vars" {
   type        = list(string)
   default     = ["APP_ENV=local", "CACHE_BYPASS=false"]
 }
+
+variable "nombre_red" {
+  description = "Nombre de la red Docker compartida"
+  type        = string
+  default     = "edge-cache-network"
+}
