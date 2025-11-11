@@ -1,35 +1,54 @@
-variable "contenedor_proxy" {
-    description = "nombre de contenedor backend"
-    type = string 
-    default = "edge-backend-proxy"
+# Variables del módulo proxy
+
+variable "nginx_image" {
+  description = "Imagen de Nginx a usar"
+  type        = string
+  default     = "nginx:alpine"
 }
 
-variable "imagen_nginx" {
-    description = "imagen nginx"
-    type = string
-    default = "nginx:alpine"
+variable "container_name" {
+  description = "Nombre del contenedor proxy"
+  type        = string
+  default     = "edge-cache-proxy"
 }
 
-variable "puerto_externo" {
-    description = "puerto backend"
-    type = number
-    default = 80
+variable "external_port" {
+  description = "Puerto expuesto del proxy"
+  type        = number
+  default     = 80
+  
+  validation {
+    condition     = var.external_port > 0 && var.external_port <= 65535
+    error_message = "El puerto debe estar entre 1 y 65535."
+  }
 }
 
-variable "ruta_nginx" {
-    description = "ruta a nginx.conf"
-    type = string
-    default = "/home/esau/Edge-Cache-Local/proxy/nginx.conf"
+variable "nginx_config_path" {
+  description = "Path a la configuración de Nginx en el host"
+  type        = string
+  default     = "./proxy/nginx.conf"
 }
 
-variable "id_contenedor_backend" {
-    description  = "Id del contenedor backend"
-    type = string 
-    default = ""
+variable "network_name" {
+  description = "Nombre de la red Docker"
+  type        = string
+  default     = "edge-cache-network"
 }
 
-variable "nombre_red" {
-    description = "nombre de la red compartida"
-    type = string 
-    default = "edge-cache-network" 
+variable "restart_policy" {
+  description = "Política de reinicio"
+  type        = string
+  default     = "unless-stopped"
+}
+
+variable "environment" {
+  description = "Variables de entorno"
+  type        = map(string)
+  default     = {}
+}
+
+variable "backend_container_id" {
+  description = "ID del contenedor backend (dependencia)"
+  type        = string
+  default     = ""
 }
