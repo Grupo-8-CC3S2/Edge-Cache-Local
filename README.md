@@ -260,3 +260,38 @@ Outputs:
 proxy_endpoint = "http://localhost:80/api/v1/health"
 {"status":"ok"}
 ```
+## Configurar cache en nginx
+Cabe mencionar que toda la infraestructura fue reformula logrando reproducibilidad, tanto los modulos como local-dev.
+Con todo, ahora abarquemos la construccion del cache primeramente.
+Dentro del bloque http creamos la cache, es decir lo declaramos:
+**proxy_cache_path = /var/cache/nginx/app_cache** es el directorio donde se almacena la cache y creamos uno para nuestra app, **keys_zone=app_cachee:10m** definos el tamaño de la cache en memoria, mientras que en disco **max_size=100m**.Tambien el tiempo maximo que se almacena en memoria **inactive=30m**. 
+Entonces se procede a probar
+```bash
+docker ps
+4e497157a84d   d4918ca78576   "/docker-entrypoint.…"   4 hours ago   Up 4 hours   0.0.0.0:80->80/tcp                 edge-cache-proxy
+9313da749d91   3d7cbbb9cc19   "/bin/sh -c 'uvicorn…"   4 hours ago   Up 4 hours   8000/tcp, 0.0.0.0:8080->8080/tcp   edge-backend
+#nuestros contenedores estan levantados
+#ejecutamos el siguiente comando de modo que nginx lea /etc/nginx/nginx.conf y verifique la sintaxis
+docker exec -it edge-cache-proxy nginx -t
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+2025/11/11 23:37:04 [emerg] 31#31: mkdir() "/var/cache/ngin/app_cache" failed (2: No such file or directory)
+nginx: [emerg] mkdir() "/var/cache/ngin/app_cache" failed (2: No such file or directory)
+nginx: configuration file /etc/nginx/nginx.conf test failed
+```
+Lo cual es comprensible por un error de codeado.Una vez corregido
+```bash
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+```
+Ahora recargamos la configuracion en caliente , es decir hacemos que -s reload envie la señal para que nginx aplique los cambios del .conf
+```bash
+docker exec -it edge-cache-proxy nginx -s reload
+ reload
+2025/11/11 23:44:42 [notice] 43#43: signal process started
+```
+Destacar que este hot reload solo afecta al contenedor no a la infra.
+Es sumamente interesante lo que realiza
+```bash
+-s reload → kill -HUP <pid_maestro_nginx>
+el daemon nginx  usa  hang up signal como orden para leer nginx.conf →arranca nuevos worlkers con la nueva conf y termina los workers viejos.  
+```
