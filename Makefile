@@ -1,7 +1,5 @@
 PYTHON := python3
 PIP := $(PYTHON) -m pip
-HOST := $(HOST)
-PORT := $(PORT)
 HOST ?= 0.0.0.0
 PORT ?= 8000
 DOCKER := docker
@@ -9,7 +7,7 @@ DOCKER_COMPOSE := docker compose
 
 BACKEND_IMAGE := app-backend:latest
 
-.PHONY: help tools run-backend build-backend-docker run-backend-docker
+.PHONY: help tools run-backend build-backend-docker run-backend-docker tests
 
 help:
 	@echo "Uso: make [comando] [opciones]"
@@ -43,3 +41,7 @@ build-backend-docker:
 run-backend-docker:
 	@echo "Ejecutando backend en Docker..."
 	HOST=0.0.0.0 PORT=$(PORT) $(DOCKER_COMPOSE) up --build
+
+tests:
+	@echo "Ejecutando tests..."
+	@export PYTHONPATH=$(PWD) && pytest -v
