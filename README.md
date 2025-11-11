@@ -120,3 +120,5 @@ Se construyen imagen y contenedor , asi como la ejecucion de los comandos del Do
 http://localhost:8080/api/v1/health
 {"status":"ok"}
 ```
+Para hacer el codigo portable se usan rutas reativas  para el contexto de docker **default     = "../../../src/app"**  y para la ruta al docerfile  
+**default   = "Dockerfile"**

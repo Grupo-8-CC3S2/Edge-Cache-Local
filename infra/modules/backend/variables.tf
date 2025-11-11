@@ -13,13 +13,13 @@ variable "container_name" {
 variable "docker_context" {
   description = "Ruta del contexto de build para Docker"
   type        = string
-  default     = "/home/esau/Edge-Cache-Local/src/app"
+  default     = "../../../src/app"
 }
 
 variable "dockerfile_path" {
   description = "Ruta al Dockerfile"
   type        = string
-  default     = "/home/esau/Edge-Cache-Local/infra/modules/backend/Dockerfile"
+  default     = "Dockerfile"
 }
 
 variable "app_port" {

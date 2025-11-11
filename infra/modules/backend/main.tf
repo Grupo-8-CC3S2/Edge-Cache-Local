@@ -11,7 +11,7 @@ provider "docker" {}
 
 resource "docker_image" "imagen_backend" {
   name = var.image_name
-
+ 
   build {
     context    = var.docker_context
     dockerfile = var.dockerfile_path
