@@ -357,3 +357,88 @@ add_header Cache-Control "no-store, no-cache, must-revalidate" always;
 Con esto ultimo las respuestas no se guardan en disco.
 
 Ahora bien , se agrega la directiva  **add_header X-Cache-Status $upstream_cache_status;** para la medicion del  hit ratio, con esta cabecera usando la variable de nginx usada para indicar el resultado de la operación en cache.
+
+
+## Agregar modulo monitor (Terraform)
+La nueva infraestructura otorga flexilibilidad y es el estilo que se usara para la creacion del nuevo modulo monitor, este simula (en un primer estadio) ejecutando comandos cada cierto tiempo.
+Entonces se declara la infraestructura para dicho modulo, en variables.tf
+Se tiene la informacion siguiente:  informacion de la imagen, del contenedor, de la red y la politica de reinicio, respesctivamente
+
+Mientras que en main se declara como sera la creacion del contenedor en base a una imagen , cuyo valor se obtiene expandiendo (inyectando) desde variables.tf, el codigo es util como documentacion.Se sabe que  **default = "alpine:latest"** es suficiente para terraform, pues se comunicara con el daemmon docker para construir la imagen y el consiguiente contenedor.
+
+Lo mas interesante es el bloque 
+```bash
+command = [ "sh","-c","while true; do echo 'monitor en marha: ....'; sleep 10; done"]
+
+```
+Dentro del resource "docker_container" "monitor" { }  , que es el monitor encargado de la creacion de los logs cada cierto tiempo
+
+En local-dev, se realiza la composicion del modulo monitor, que se suma a los ya existentes backend  y proxy , este bloque es crucial
+```bash
+module "monitor" {
+  source = "../../modules/monitor"
+  nombre_contenedor = "edge-cache-monitor"
+  nombre_red        = docker_network.edge_cache.name
+  politica_reinicio = var.restart_policy
+
+  depends_on = [docker_network.edge_cache]
+}
+
+```
+De modo tal que le pasamos los valores de las variables a las variables en monitor.
+Se ejecuta de la siguiente manera 
+```bash
+docker rm -f edge-cache-monitor # limpia el contenedor existente
+terraform init
+terraform apply
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+docker ps #verifica una salidad similar
+CONTAINER ID   IMAGE          COMMAND                  CREATED          STATUS          PORTS                              NAMES
+d99bce37cbd8   bebd4d8fe0e3   "sh -c 'while true; …"   33 minutes ago   Up 33 minutes                                      edge-cache-monitor
+4e497157a84d   d4918ca78576   "/docker-entrypoint.…"   14 hours ago     Up 14 hours     0.0.0.0:80->80/tcp                 edge-cache-proxy
+9313da749d91   3d7cbbb9cc19   "/bin/sh -c 'uvicorn…"   14 hours ago     Up 14 hours     8000/tcp, 0.0.0.0:8080->8080/tcp   edge-backend
+```
+Se ha levantado la infraestructura , construido el contenedor y lanzado el servicio dentro del contenedor , en una misma red ,  junto con los otros contenedores con servicios dentro de ellos.
+Y luego 
+```bash
+docker logs -f edge-cache-monitor
+monitor en marha: ....
+monitor en marha: ....
+monitor en marha: ....
+```
+Ahora lo que el monitor esta operativo debera ejecutar un script analize_logs.py que leera el access.log que nginx guarda, este contiene info de los requests mandados hacia nginx. Luego analize_logs calculara metricas como total de requests, ratio hit, total de bytes transferidos .
+
+Posteriormente estas metricas seran usadas por generate_report.py
+
+Para ello agregamos en main.tf del modulo monitor
+```bash
+# reemplazar por tu /home/usuario /home/esau/
+ volumes {
+  host_path      = "/home/esau/Edge-Cache-Local/src/app"
+  container_path = "/app"
+}
+
+volumes {
+  host_path      = "/home/esau/Edge-Cache-Local/logs/nginx.access.log"
+  container_path = "/logs/access.log"
+}
+
+  # Comando de scraping continuo
+  command = [
+    "sh", "-c",
+    "while true; do python3 /app/analyze_logs.py /logs/access.log --container edge-cache-proxy; sleep ${var.scrape_interval}; done"
+  ]
+```
+la ejecucion habitual y luego 
+```bash
+docker exec -it edge-cache-monitor ls /app
+docker logs edge-cache-monitor
+Total requests: 3
+Cache hits (200): 2
+Cache misses (404): 0
+Hit ratio: 66.67%
+Total bytes: 297
+Total requests: 3
+Cache hits (200): 2
+Cache misses (404): 0
+```

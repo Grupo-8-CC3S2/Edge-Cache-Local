@@ -101,3 +101,17 @@ output "stack_summary" {
     backend_direct = module.backend.external_endpoint
   }
 }
+
+
+module "monitor" {
+  source = "../../modules/monitor"
+  nombre_contenedor = "edge-cache-monitor"
+  nombre_red        = docker_network.edge_cache.name
+  politica_reinicio = var.restart_policy
+
+  depends_on = [docker_network.edge_cache]
+}
+
+output "monitor_container" {
+  value = module.monitor.nombre_contenedor
+}
