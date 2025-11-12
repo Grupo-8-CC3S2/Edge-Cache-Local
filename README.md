@@ -260,3 +260,100 @@ Outputs:
 proxy_endpoint = "http://localhost:80/api/v1/health"
 {"status":"ok"}
 ```
+## Configurar cache en nginx
+Cabe mencionar que toda la infraestructura fue reformula logrando reproducibilidad, tanto los modulos como local-dev.
+Con todo, ahora abarquemos la definición del cache primeramente.En nginx.conf quien contiene la configuracion de nginx,
+dentro del bloque **http { }** creamos la cache, es decir lo declaramos agregando alguna directivas<br>
+- **proxy_cache_path = /var/cache/nginx/app_cache** : De modo que se define el directorio donde se almacena la cache , app_cache es el que corresponde a nuestro proyecto.
+- **keys_zone=app_cachee:10m**
+Con la cual definos el tamaño de la cache en memoria.
+- **max_size=100m** : tamaño que en disco .
+- **inactive=30m**:Tambien el tiempo maximo que se almacena en memoria 
+Entonces se procede a probar
+```bash
+docker ps  
+#nuestros contenedores estan levantados
+#ejecutamos el siguiente comando de modo que nginx lea /etc/nginx/nginx.conf y verifique la sintaxis y recargar nginx
+docker exec -it edge-cache-proxy nginx -t
+docker exec -it edge-cache-proxy nginx -s reload
+```
+Cabe destacar que este hot reload solo afecta al contenedor no a la infraestructura, ademas de ser interesante lo que realiza
+```bash
+-s reload → kill -HUP <pid_maestro_nginx>
+el daemon nginx  usa  hang up signal como orden para leer nginx.conf →arranca nuevos workers con la nueva conf y termina los workers viejos.  
+```
+
+Nuestro servidor tiene varios tipos de contenido , entonces se requieren politicas de almacenamiento de acuerdo a esto.
+Entonces dentro del bloque server agregamos 
+- **location /api/v1/item { }** y **location/api/v1/health { }**<br> Se usa la directiva **proxy_cache_key** junto con la política **"$scheme$request_method$host$uri"**<br>
+proxy_cache_key crea un identificador para el archivo en esa ruta y cada vez que llegue una solicitud a ese recurso se usa este id para obtenerlo de la cache, asi evitamos ir hasta el backend.En este caso la politica establecida representará : 
+    - el protocolo
+    - tipo de request
+    - el dominio  
+    - la ruta del recurso para el endpoint item
+```bash
+GET http://localhost/api/v1/item/file.js → httpGETlocalhost/api/v1/file.js
+``` 
+Ademas **proxy_cache_valid** permite mantener el tipo de respuesta un tiempo establecido en cache<br>
+Procedemos a verificar la sintaxis y recargar nginx, verificando ademas que que la cache se haya creado
+```bash
+docker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+```
+```
+Hacemos las peticiones:
+```bash
+curl http://localhost/api/v1/item/1
+curl http://localhost/api/v1/item/2
+#verificando la cache mediante querys sucesivos
+docker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://localhost/api/v1/item/2      
+{"id":"2","value":"beta"}esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://locadocker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+total 8K     
+drwx------    3 nginx    nginx       4.0K Nov 12 01:09 1
+drwx------    3 nginx    nginx       4.0K Nov 12 01:06 f
+esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://localhost/api/v1/item/2      
+{"id":"2","value":"beta"}esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://locadocker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+total 8K     
+drwx------    3 nginx    nginx       4.0K Nov 12 01:09 1
+drwx------    3 nginx    nginx       4.0K Nov 12 01:06 f
+
+```
+La memoria asignada corresponde a los id→hash creados , no se repiten
+
+Ahora conviene agregar algunos campos headers para recolectar informacion del cliente y que nginx pueda reenviarlas al backend, las cabeceras usadas en el labo1 son precisas.
+```bash
+proxy_set_header X-Forwarded-Host $host;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto https;
+```
+Las cabeceras el cliente envia su ip  el host desde donde se hace el query y el protocolo usado respectivamente.
+Revisando la sintaxis y recargando nginx , realizamos la consulta incluyendo esas cabeceras se obtiene
+```bash
+curl -v   -H "X-Forwarded-For: localhost"   -H "X-Forwarded-Proto: https"   -H "X-Forwarded-Host: localhost"     http://loca
+lhost/api/v1/item/2
+HTTP/1.1 200 OK
+< Server: nginx/1.29.3
+< Date: Wed, 12 Nov 2025 02:20:27 GMT
+< Content-Type: application/json
+< Content-Length: 25
+< Connection: keep-alive
+< cache-control: public, max-age=60
+<
+* Connection #0 to host localhost left intact
+{"id":"2","value":"beta"}
+```
+Seguidamente modificamos la politica para el endpoint item/ por **"$scheme$request_method$host$uri$is_args$args** pues los retornos no son valores estaticos, recargando nginx, haciendo la consulta y revisando la cache
+```bash
+curl -H "Host: localhost" http://localhost/api/v1/item/2?id=value
+{"id":"2","value":"beta"}
+drwx------    3 nginx    nginx       4.0K Nov 12 01:09 1
+drwx------    3 nginx    nginx       4.0K Nov 12 02:48 7
+drwx------    3 nginx    nginx       4.0K Nov 12 01:06 f
+```
+Ahora para la gestión de endpoints que no requieren usar cache ,como datos sensibles de usuario definimos  **location /api/no-cache {}** que maneja las peticiones al endpoint en cuestion . Entonces para las directivas usadas en este caso son : proxy_cache_bypass 1, proxy_no_cache 1. Asi evitamos almacenar el cache las respuestas para estas solicitudes de este tipo
+```bash
+add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+```
+Con esto ultimo las respuestas no se guardan en disco.
+
+Ahora bien , se agrega la directiva  **add_header X-Cache-Status $upstream_cache_status;** para la medicion del  hit ratio, con esta cabecera usando la variable de nginx usada para indicar el resultado de la operación en cache.
