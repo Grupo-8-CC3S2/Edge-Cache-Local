@@ -394,3 +394,38 @@ terraform apply
 Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
 ```
 Se ha levantado la infraestructura , construido el contenedor y lanzado el servicio dentro del contenedor , en una misma red ,  junto con los otros contenedores con servicios dentro de ellos.
+Y luego 
+```bash
+docker logs -f edge-cache-monitor
+monitor en marha: ....
+monitor en marha: ....
+monitor en marha: ....
+```
+Ahora lo que el mmonitor esta operativo debera ejecutar un script analize_logs.py que leera el access.log que nginx guarda, este contiene info de los requests mandados hacia nginx. Luego analize_logs calculara metricas como total de requests, ratio hit, total de bytes transferidos 
+
+Posteriormente estas metricas seran usadas por generate_report.py
+
+Para ello agregamos en main.tf del modulo monitor
+```bash
+# reemplazar por tu /home/usuario /home/esau/
+ volumes {
+  host_path      = "/home/esau/Edge-Cache-Local/src/app"
+  container_path = "/app"
+}
+
+volumes {
+  host_path      = "/home/esau/Edge-Cache-Local/logs/nginx.access.log"
+  container_path = "/logs/access.log"
+}
+
+  # Comando de scraping continuo
+  command = [
+    "sh", "-c",
+    "while true; do python3 /app/analyze_logs.py /logs/access.log --container edge-cache-proxy; sleep ${var.scrape_interval}; done"
+  ]
+```
+la ejecucion habitual y luego 
+```bash
+docker exec -it edge-cache-monitor ls /app
+docker logs edge-cache-monitor
+```
