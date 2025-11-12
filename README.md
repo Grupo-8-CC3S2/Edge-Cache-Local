@@ -262,60 +262,43 @@ proxy_endpoint = "http://localhost:80/api/v1/health"
 ```
 ## Configurar cache en nginx
 Cabe mencionar que toda la infraestructura fue reformula logrando reproducibilidad, tanto los modulos como local-dev.
-Con todo, ahora abarquemos la construccion del cache primeramente.
-Dentro del bloque http creamos la cache, es decir lo declaramos:
-**proxy_cache_path = /var/cache/nginx/app_cache** es el directorio donde se almacena la cache y creamos uno para nuestra app, **keys_zone=app_cachee:10m** definos el tamaño de la cache en memoria, mientras que en disco **max_size=100m**.Tambien el tiempo maximo que se almacena en memoria **inactive=30m**. 
+Con todo, ahora abarquemos la definición del cache primeramente.En nginx.conf quien contiene la configuracion de nginx,
+dentro del bloque **http { }** creamos la cache, es decir lo declaramos agregando alguna directivas<br>
+- **proxy_cache_path = /var/cache/nginx/app_cache** : De modo que se define el directorio donde se almacena la cache , app_cache es el que corresponde a nuestro proyecto.
+- **keys_zone=app_cachee:10m**
+Con la cual definos el tamaño de la cache en memoria.
+- **max_size=100m** : tamaño que en disco .
+- **inactive=30m**:Tambien el tiempo maximo que se almacena en memoria 
 Entonces se procede a probar
 ```bash
-docker ps
-4e497157a84d   d4918ca78576   "/docker-entrypoint.…"   4 hours ago   Up 4 hours   0.0.0.0:80->80/tcp                 edge-cache-proxy
-9313da749d91   3d7cbbb9cc19   "/bin/sh -c 'uvicorn…"   4 hours ago   Up 4 hours   8000/tcp, 0.0.0.0:8080->8080/tcp   edge-backend
+docker ps  
 #nuestros contenedores estan levantados
-#ejecutamos el siguiente comando de modo que nginx lea /etc/nginx/nginx.conf y verifique la sintaxis
+#ejecutamos el siguiente comando de modo que nginx lea /etc/nginx/nginx.conf y verifique la sintaxis y recargar nginx
 docker exec -it edge-cache-proxy nginx -t
-nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
-2025/11/11 23:37:04 [emerg] 31#31: mkdir() "/var/cache/ngin/app_cache" failed (2: No such file or directory)
-nginx: [emerg] mkdir() "/var/cache/ngin/app_cache" failed (2: No such file or directory)
-nginx: configuration file /etc/nginx/nginx.conf test failed
-```
-Lo cual es comprensible por un error de codeado.Una vez corregido
-```bash
-nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
-nginx: configuration file /etc/nginx/nginx.conf test is successful
-```
-Ahora recargamos la configuracion en caliente , es decir hacemos que -s reload envie la señal para que nginx aplique los cambios del .conf
-```bash
 docker exec -it edge-cache-proxy nginx -s reload
- reload
-2025/11/11 23:44:42 [notice] 43#43: signal process started
 ```
-Destacar que este hot reload solo afecta al contenedor no a la infra.
-Es sumamente interesante lo que realiza
+Cabe destacar que este hot reload solo afecta al contenedor no a la infraestructura, ademas de ser interesante lo que realiza
 ```bash
 -s reload → kill -HUP <pid_maestro_nginx>
 el daemon nginx  usa  hang up signal como orden para leer nginx.conf →arranca nuevos workers con la nueva conf y termina los workers viejos.  
 ```
 
 Nuestro servidor tiene varios tipos de contenido , entonces se requieren politicas de almacenamiento de acuerdo a esto.
-Entonces dentro del bloque server agregamos location /api/v1/item /api/v1/health con las politicas como **proxy_cache_key "$scheme$request_method$host$uri";**
-donde proxy_cache_key crea un identificador para el archivo en esa ruta y cada vez que llegue una solicitud a ese recurso se usa este id para obtenerlo de la cache, asi evitamos ir hasta el backend. 
+Entonces dentro del bloque server agregamos 
+- **location /api/v1/item { }** y **location/api/v1/health { }**<br> Se usa la directiva **proxy_cache_key** junto con la política **"$scheme$request_method$host$uri"**<br>
+proxy_cache_key crea un identificador para el archivo en esa ruta y cada vez que llegue una solicitud a ese recurso se usa este id para obtenerlo de la cache, asi evitamos ir hasta el backend.En este caso la politica establecida representará : 
+    - el protocolo
+    - tipo de query
+    - el dominio  
+    - la ruta del recurso para el endpoint item
 ```bash
-GET http://localhost/api/v1/item/file.js → httpGETlocalhost/api/static/file.js
+GET http://localhost/api/v1/item/file.js → httpGETlocalhost/api/v1/file.js
+``` 
+Ademas **proxy_cache_valid** permite mantener el tipo de respuesta un tiempo establecido en cache<br>
+Procedemos a verificar la sintaxis y recargar nginx, verificando ademas que que la cache se haya creado
+```bash
+docker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
 ```
-En este caso la politica establecida representara el protocolo,tipo de query, el dominio y la ruta del recurso para el endpoint item
-Ademas **proxy_cache_valid** permite mantener el tipo de respuesta un tiempo establecido en cache
-Procedemos a verificar la sintaxis y recargar nginx
-```bash
-docker exec -it edge-cache-proxy nginx -t 
-.. syntax is ok
-.. is successful
-docker exec -it edge-cache-proxy nginx -s reload
-.. started
-```
-Y verificar que exista la cache
-```bash
- docker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
-total 0
 ```
 Hacemos las peticiones:
 ```bash
@@ -337,7 +320,7 @@ drwx------    3 nginx    nginx       4.0K Nov 12 01:06 f
 ```
 La memoria asignada corresponde a los id→hash creados , no se repiten
 
-Ahora conviene agregar algunos campos headers para recolectar informacion del cliente y que nginx pueda pasarselas al backend, las cabeceras usadas en el labo1 son precisas.
+Ahora conviene agregar algunos campos headers para recolectar informacion del cliente y que nginx pueda reenviarlas al backend, las cabeceras usadas en el labo1 son precisas.
 ```bash
 proxy_set_header X-Forwarded-Host $host;
 proxy_set_header X-Forwarded-For $remote_addr;
@@ -359,5 +342,16 @@ HTTP/1.1 200 OK
 * Connection #0 to host localhost left intact
 {"id":"2","value":"beta"}
 ```
-
-
+Seguidamente modificamos la politica para el endpoint item/ por **"$scheme$request_method$host$uri$is_args$args** pues los retornos no son valores estaticos, recargando nginx, haciendo la consulta y revisando la cache
+```bash
+curl -H "Host: localhost" http://localhost/api/v1/item/2?id=value
+{"id":"2","value":"beta"}
+drwx------    3 nginx    nginx       4.0K Nov 12 01:09 1
+drwx------    3 nginx    nginx       4.0K Nov 12 02:48 7
+drwx------    3 nginx    nginx       4.0K Nov 12 01:06 f
+```
+Ahora para la gestión de endpoints que no requieren usar cache ,como datos sensibles de usuario definimos  **location /api/no-cache {}** que maneja las peticiones al endpoint en cuestion . Entonces para las directivas usadas en este caso son : proxy_cache_bypass 1, proxy_no_cache 1. Asi evitamos almacenar el cache las respuestas para estas solicitudes de este tipo
+```bash
+add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+```
+Con esto ultimo las respuestas no se guard en disco.
