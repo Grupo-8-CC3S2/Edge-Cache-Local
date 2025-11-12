@@ -288,7 +288,7 @@ Entonces dentro del bloque server agregamos
 - **location /api/v1/item { }** y **location/api/v1/health { }**<br> Se usa la directiva **proxy_cache_key** junto con la política **"$scheme$request_method$host$uri"**<br>
 proxy_cache_key crea un identificador para el archivo en esa ruta y cada vez que llegue una solicitud a ese recurso se usa este id para obtenerlo de la cache, asi evitamos ir hasta el backend.En este caso la politica establecida representará : 
     - el protocolo
-    - tipo de query
+    - tipo de request
     - el dominio  
     - la ruta del recurso para el endpoint item
 ```bash
@@ -354,4 +354,6 @@ Ahora para la gestión de endpoints que no requieren usar cache ,como datos sens
 ```bash
 add_header Cache-Control "no-store, no-cache, must-revalidate" always;
 ```
-Con esto ultimo las respuestas no se guard en disco.
+Con esto ultimo las respuestas no se guardan en disco.
+
+Ahora bien , se agrega la directiva  **add_header X-Cache-Status $upstream_cache_status;** para la medicion del  hit ratio, con esta cabecera usando la variable de nginx usada para indicar el resultado de la operación en cache.
