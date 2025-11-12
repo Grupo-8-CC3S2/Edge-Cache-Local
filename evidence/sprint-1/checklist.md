@@ -23,5 +23,5 @@ tests/unit/test_app.py::test_health_ok PASSED                                   
 tests/unit/test_app.py::test_get_item_cache_header[1-store0-alpha] PASSED              [ 50%] 
 tests/unit/test_app.py::test_get_item_cache_header[2-store1-beta] PASSED               [ 75%] 
 tests/unit/test_app.py::test_get_item_cache_header[9-store2-] PASSED                   [100%]
+===================================== 4 passed in 0.05s  
 
-===================================== 4 passed in 0.05s ======================================

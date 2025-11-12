@@ -293,5 +293,46 @@ Destacar que este hot reload solo afecta al contenedor no a la infra.
 Es sumamente interesante lo que realiza
 ```bash
 -s reload → kill -HUP <pid_maestro_nginx>
-el daemon nginx  usa  hang up signal como orden para leer nginx.conf →arranca nuevos worlkers con la nueva conf y termina los workers viejos.  
+el daemon nginx  usa  hang up signal como orden para leer nginx.conf →arranca nuevos workers con la nueva conf y termina los workers viejos.  
 ```
+
+Nuestro servidor tiene varios tipos de contenido , entonces se requieren politicas de almacenamiento de acuerdo a esto.
+Entonces dentro del bloque server agregamos location /api/v1/item /api/v1/health con las politicas como **proxy_cache_key "$scheme$request_method$host$uri";**
+donde proxy_cache_key crea un identificador para el archivo en esa ruta y cada vez que llegue una solicitud a ese recurso se usa este id para obtenerlo de la cache, asi evitamos ir hasta el backend. 
+```bash
+GET http://localhost/api/v1/item/file.js → httpGETlocalhost/api/static/file.js
+```
+En este caso la politica establecida representara el protocolo,tipo de query, el dominio y la ruta del recurso para el endpoint item
+Ademas **proxy_cache_valid** permite mantener el tipo de respuesta un tiempo establecido en cache
+Procedemos a verificar la sintaxis y recargar nginx
+```bash
+docker exec -it edge-cache-proxy nginx -t 
+.. syntax is ok
+.. is successful
+docker exec -it edge-cache-proxy nginx -s reload
+.. started
+```
+Y verificar que exista la cache
+```bash
+ docker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+total 0
+```
+Hacemos las peticiones:
+```bash
+curl http://localhost/api/v1/item/1
+curl http://localhost/api/v1/item/2
+#verificando la cache mediante querys sucesivos
+docker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://localhost/api/v1/item/2      
+{"id":"2","value":"beta"}esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://locadocker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+total 8K     
+drwx------    3 nginx    nginx       4.0K Nov 12 01:09 1
+drwx------    3 nginx    nginx       4.0K Nov 12 01:06 f
+esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://localhost/api/v1/item/2      
+{"id":"2","value":"beta"}esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://locadocker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+total 8K     
+drwx------    3 nginx    nginx       4.0K Nov 12 01:09 1
+drwx------    3 nginx    nginx       4.0K Nov 12 01:06 f
+
+```
+La memoria asignada corresponde a los id→hash creados , no se repiten
