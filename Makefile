@@ -86,3 +86,15 @@ destroy: # Destruye infraestructura
 	@echo "Destruyendo infraestructura..."
 	cd $(INFRA_DIR) && $(TERRAFORM) destroy -auto-approve
 	@echo "Infraestructura destruida"
+
+lint:
+	@echo "Lint..."
+	python -m pyflakes src tests || true
+
+cov:
+	@echo "Tests with coverage gate..."
+	@export PYTHONPATH=$(PWD) && pytest -vv --cov=src --cov-report=term-missing --cov-fail-under=85
+
+parser:
+	@echo "Reading logs from logs/nginx.access.log ..."
+	@cat logs/nginx.access.log | python src/nginx_log_parser.py
