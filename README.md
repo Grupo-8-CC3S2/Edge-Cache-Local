@@ -1,7 +1,64 @@
 # Edge-Cache-Local
 
-CDN casera con Nginx + pruebas de performance
+CDN casera con Nginx + pruebas de performance.
 El proyecto consiste en montar un reverse proxy con caché (Nginx) delante de un servicio backend, con políticas de cacheo, invalidación y observabilidad de hit/miss. Ademas en la orquestación local con Terraform (docker provider/localexec, evitando imports manuales).
+
+## Uso de la Infraestructura
+
+Configuramos nuestras variables de entorno. Ejemplo de `infra/stacks/local-dev/terraform.tfvars`:
+
+```
+# Variables para el stack de desarrollo local
+
+# General
+app_version    = "1.0.0"
+network_name   = "edge-cache-network"
+restart_policy = "unless-stopped"
+
+# Backend
+backend_container_name = "edge-backend"
+backend_image          = "edge-cache-backend:latest"
+backend_build_context  = "../../../" # Path relativo al root del proyecto
+backend_internal_port  = 8080
+backend_external_port  = 8080
+
+backend_environment = {
+  HOST = "0.0.0.0"
+  PORT = 8080
+}
+
+# Proxy
+proxy_container_name = "edge-cache-proxy"
+nginx_image          = "nginx:alpine"
+nginx_config_path    = "/home/jquispe/Escritorio/cursos/Actividades/Edge-Cache-Local/proxy/nginx.conf"  # Ruta al nginx.conf que usaremos
+proxy_external_port  = 80
+```
+
+Creamos la infraestructura:
+
+```sh
+make plan
+make apply
+```
+
+Verificamos:
+
+```sh
+# La respuesta debe ser {"status":"ok"}
+curl http://localhost:8080/api/v1/health 
+curl http://localhost:80/api/v1/health
+curl http://localhost/api/v1/health
+```
+
+Ademas al ejecutar `docker ps` deberiamos tener de salida algo como:
+
+```
+CONTAINER ID   IMAGE          COMMAND                  CREATED              STATUS              PORTS                              NAMES
+1edc286df1c3   d4918ca78576   "/docker-entrypoint.…"   About a minute ago   Up About a minute   0.0.0.0:80->80/tcp                 edge-cache-proxy
+0669781d5cef   1ffb655cd9f9   "/bin/sh -c 'uvicorn…"   About a minute ago   Up About a minute   8000/tcp, 0.0.0.0:8080->8080/tcp   edge-backend
+```
+
+Para destruir la infraestructura desplegada usamos `make destroy`.
 
 ## Uso del Backend
 
@@ -202,4 +259,186 @@ Outputs:
 
 proxy_endpoint = "http://localhost:80/api/v1/health"
 {"status":"ok"}
+```
+## Configurar cache en nginx
+Cabe mencionar que toda la infraestructura fue reformula logrando reproducibilidad, tanto los modulos como local-dev.
+Con todo, ahora abarquemos la definición del cache primeramente.En nginx.conf quien contiene la configuracion de nginx,
+dentro del bloque **http { }** creamos la cache, es decir lo declaramos agregando alguna directivas<br>
+- **proxy_cache_path = /var/cache/nginx/app_cache** : De modo que se define el directorio donde se almacena la cache , app_cache es el que corresponde a nuestro proyecto.
+- **keys_zone=app_cachee:10m**
+Con la cual definos el tamaño de la cache en memoria.
+- **max_size=100m** : tamaño que en disco .
+- **inactive=30m**:Tambien el tiempo maximo que se almacena en memoria 
+Entonces se procede a probar
+```bash
+docker ps  
+#nuestros contenedores estan levantados
+#ejecutamos el siguiente comando de modo que nginx lea /etc/nginx/nginx.conf y verifique la sintaxis y recargar nginx
+docker exec -it edge-cache-proxy nginx -t
+docker exec -it edge-cache-proxy nginx -s reload
+```
+Cabe destacar que este hot reload solo afecta al contenedor no a la infraestructura, ademas de ser interesante lo que realiza
+```bash
+-s reload → kill -HUP <pid_maestro_nginx>
+el daemon nginx  usa  hang up signal como orden para leer nginx.conf →arranca nuevos workers con la nueva conf y termina los workers viejos.  
+```
+
+Nuestro servidor tiene varios tipos de contenido , entonces se requieren politicas de almacenamiento de acuerdo a esto.
+Entonces dentro del bloque server agregamos 
+- **location /api/v1/item { }** y **location/api/v1/health { }**<br> Se usa la directiva **proxy_cache_key** junto con la política **"$scheme$request_method$host$uri"**<br>
+proxy_cache_key crea un identificador para el archivo en esa ruta y cada vez que llegue una solicitud a ese recurso se usa este id para obtenerlo de la cache, asi evitamos ir hasta el backend.En este caso la politica establecida representará : 
+    - el protocolo
+    - tipo de request
+    - el dominio  
+    - la ruta del recurso para el endpoint item
+```bash
+GET http://localhost/api/v1/item/file.js → httpGETlocalhost/api/v1/file.js
+``` 
+Ademas **proxy_cache_valid** permite mantener el tipo de respuesta un tiempo establecido en cache<br>
+Procedemos a verificar la sintaxis y recargar nginx, verificando ademas que que la cache se haya creado
+```bash
+docker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+```
+```
+Hacemos las peticiones:
+```bash
+curl http://localhost/api/v1/item/1
+curl http://localhost/api/v1/item/2
+#verificando la cache mediante querys sucesivos
+docker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://localhost/api/v1/item/2      
+{"id":"2","value":"beta"}esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://locadocker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+total 8K     
+drwx------    3 nginx    nginx       4.0K Nov 12 01:09 1
+drwx------    3 nginx    nginx       4.0K Nov 12 01:06 f
+esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://localhost/api/v1/item/2      
+{"id":"2","value":"beta"}esau@DESKTOP-A3RPEKP:~/Edge-Cache-Local/proxy$ curl http://locadocker exec -it edge-cache-proxy ls -lh /var/cache/nginx/app_cache
+total 8K     
+drwx------    3 nginx    nginx       4.0K Nov 12 01:09 1
+drwx------    3 nginx    nginx       4.0K Nov 12 01:06 f
+
+```
+La memoria asignada corresponde a los id→hash creados , no se repiten
+
+Ahora conviene agregar algunos campos headers para recolectar informacion del cliente y que nginx pueda reenviarlas al backend, las cabeceras usadas en el labo1 son precisas.
+```bash
+proxy_set_header X-Forwarded-Host $host;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto https;
+```
+Las cabeceras el cliente envia su ip  el host desde donde se hace el query y el protocolo usado respectivamente.
+Revisando la sintaxis y recargando nginx , realizamos la consulta incluyendo esas cabeceras se obtiene
+```bash
+curl -v   -H "X-Forwarded-For: localhost"   -H "X-Forwarded-Proto: https"   -H "X-Forwarded-Host: localhost"     http://loca
+lhost/api/v1/item/2
+HTTP/1.1 200 OK
+< Server: nginx/1.29.3
+< Date: Wed, 12 Nov 2025 02:20:27 GMT
+< Content-Type: application/json
+< Content-Length: 25
+< Connection: keep-alive
+< cache-control: public, max-age=60
+<
+* Connection #0 to host localhost left intact
+{"id":"2","value":"beta"}
+```
+Seguidamente modificamos la politica para el endpoint item/ por **"$scheme$request_method$host$uri$is_args$args** pues los retornos no son valores estaticos, recargando nginx, haciendo la consulta y revisando la cache
+```bash
+curl -H "Host: localhost" http://localhost/api/v1/item/2?id=value
+{"id":"2","value":"beta"}
+drwx------    3 nginx    nginx       4.0K Nov 12 01:09 1
+drwx------    3 nginx    nginx       4.0K Nov 12 02:48 7
+drwx------    3 nginx    nginx       4.0K Nov 12 01:06 f
+```
+Ahora para la gestión de endpoints que no requieren usar cache ,como datos sensibles de usuario definimos  **location /api/no-cache {}** que maneja las peticiones al endpoint en cuestion . Entonces para las directivas usadas en este caso son : proxy_cache_bypass 1, proxy_no_cache 1. Asi evitamos almacenar el cache las respuestas para estas solicitudes de este tipo
+```bash
+add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+```
+Con esto ultimo las respuestas no se guardan en disco.
+
+Ahora bien , se agrega la directiva  **add_header X-Cache-Status $upstream_cache_status;** para la medicion del  hit ratio, con esta cabecera usando la variable de nginx usada para indicar el resultado de la operación en cache.
+
+
+## Agregar modulo monitor (Terraform)
+La nueva infraestructura otorga flexilibilidad y es el estilo que se usara para la creacion del nuevo modulo monitor, este simula (en un primer estadio) ejecutando comandos cada cierto tiempo.
+Entonces se declara la infraestructura para dicho modulo, en variables.tf
+Se tiene la informacion siguiente:  informacion de la imagen, del contenedor, de la red y la politica de reinicio, respesctivamente
+
+Mientras que en main se declara como sera la creacion del contenedor en base a una imagen , cuyo valor se obtiene expandiendo (inyectando) desde variables.tf, el codigo es util como documentacion.Se sabe que  **default = "alpine:latest"** es suficiente para terraform, pues se comunicara con el daemmon docker para construir la imagen y el consiguiente contenedor.
+
+Lo mas interesante es el bloque 
+```bash
+command = [ "sh","-c","while true; do echo 'monitor en marha: ....'; sleep 10; done"]
+
+```
+Dentro del resource "docker_container" "monitor" { }  , que es el monitor encargado de la creacion de los logs cada cierto tiempo
+
+En local-dev, se realiza la composicion del modulo monitor, que se suma a los ya existentes backend  y proxy , este bloque es crucial
+```bash
+module "monitor" {
+  source = "../../modules/monitor"
+  nombre_contenedor = "edge-cache-monitor"
+  nombre_red        = docker_network.edge_cache.name
+  politica_reinicio = var.restart_policy
+
+  depends_on = [docker_network.edge_cache]
+}
+
+```
+De modo tal que le pasamos los valores de las variables a las variables en monitor.
+Se ejecuta de la siguiente manera 
+```bash
+docker rm -f edge-cache-monitor # limpia el contenedor existente
+terraform init
+terraform apply
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+docker ps #verifica una salidad similar
+CONTAINER ID   IMAGE          COMMAND                  CREATED          STATUS          PORTS                              NAMES
+d99bce37cbd8   bebd4d8fe0e3   "sh -c 'while true; …"   33 minutes ago   Up 33 minutes                                      edge-cache-monitor
+4e497157a84d   d4918ca78576   "/docker-entrypoint.…"   14 hours ago     Up 14 hours     0.0.0.0:80->80/tcp                 edge-cache-proxy
+9313da749d91   3d7cbbb9cc19   "/bin/sh -c 'uvicorn…"   14 hours ago     Up 14 hours     8000/tcp, 0.0.0.0:8080->8080/tcp   edge-backend
+```
+Se ha levantado la infraestructura , construido el contenedor y lanzado el servicio dentro del contenedor , en una misma red ,  junto con los otros contenedores con servicios dentro de ellos.
+Y luego 
+```bash
+docker logs -f edge-cache-monitor
+monitor en marha: ....
+monitor en marha: ....
+monitor en marha: ....
+```
+Ahora lo que el monitor esta operativo debera ejecutar un script analize_logs.py que leera el access.log que nginx guarda, este contiene info de los requests mandados hacia nginx. Luego analize_logs calculara metricas como total de requests, ratio hit, total de bytes transferidos .
+
+Posteriormente estas metricas seran usadas por generate_report.py
+
+Para ello agregamos en main.tf del modulo monitor
+```bash
+# reemplazar por tu /home/usuario /home/esau/
+ volumes {
+  host_path      = "/home/esau/Edge-Cache-Local/src/app"
+  container_path = "/app"
+}
+
+volumes {
+  host_path      = "/home/esau/Edge-Cache-Local/logs/nginx.access.log"
+  container_path = "/logs/access.log"
+}
+
+  # Comando de scraping continuo
+  command = [
+    "sh", "-c",
+    "while true; do python3 /app/analyze_logs.py /logs/access.log --container edge-cache-proxy; sleep ${var.scrape_interval}; done"
+  ]
+```
+la ejecucion habitual y luego 
+```bash
+docker exec -it edge-cache-monitor ls /app
+docker logs edge-cache-monitor
+Total requests: 3
+Cache hits (200): 2
+Cache misses (404): 0
+Hit ratio: 66.67%
+Total bytes: 297
+Total requests: 3
+Cache hits (200): 2
+Cache misses (404): 0
 ```
