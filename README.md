@@ -336,3 +336,28 @@ drwx------    3 nginx    nginx       4.0K Nov 12 01:06 f
 
 ```
 La memoria asignada corresponde a los id→hash creados , no se repiten
+
+Ahora conviene agregar algunos campos headers para recolectar informacion del cliente y que nginx pueda pasarselas al backend, las cabeceras usadas en el labo1 son precisas.
+```bash
+proxy_set_header X-Forwarded-Host $host;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto https;
+```
+Las cabeceras el cliente envia su ip  el host desde donde se hace el query y el protocolo usado respectivamente.
+Revisando la sintaxis y recargando nginx , realizamos la consulta incluyendo esas cabeceras se obtiene
+```bash
+curl -v   -H "X-Forwarded-For: localhost"   -H "X-Forwarded-Proto: https"   -H "X-Forwarded-Host: localhost"     http://loca
+lhost/api/v1/item/2
+HTTP/1.1 200 OK
+< Server: nginx/1.29.3
+< Date: Wed, 12 Nov 2025 02:20:27 GMT
+< Content-Type: application/json
+< Content-Length: 25
+< Connection: keep-alive
+< cache-control: public, max-age=60
+<
+* Connection #0 to host localhost left intact
+{"id":"2","value":"beta"}
+```
+
+
