@@ -25,3 +25,20 @@ def test_get_item_cache_header(client: TestClient, monkeypatch, item_id, store, 
     assert any(k.lower() == "cache-control" for k in r.headers.keys())
     assert "max-age=60" in r.headers.get("Cache-Control", "") or \
            "max-age=60" in next((v for k, v in r.headers.items() if k.lower()=="cache-control"), "")
+
+def test_stable_cacheable(client):
+    r = client.get("/api/v1/stable?id=test")
+    assert r.status_code == 200
+    assert r.headers.get("Cache-Control") == "public, max-age=60"
+
+def test_volatile_no_store(client):
+    r = client.get("/api/v1/volatile")
+    assert r.status_code == 200
+    assert r.headers.get("Cache-Control") == "no-store"
+
+def test_revalidate_200_then_304(client):
+    r1 = client.get("/api/v1/revalidate?id=test")
+    assert r1.status_code == 200
+    etag = r1.headers["ETag"]
+    r2 = client.get("/api/v1/revalidate?id=test", headers={"If-None-Match": etag})
+    assert r2.status_code == 304
